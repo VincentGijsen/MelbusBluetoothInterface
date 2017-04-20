@@ -31,7 +31,13 @@ volatile uint8_t melbus_CharBytes = 0;
 volatile uint8_t melbus_OutByte = 0xFF;
 volatile uint8_t melbus_LastReadByte[12] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
 volatile uint8_t melbus_SendBuffer[9] = {0x00, 0x02, 0x00, 0x01, 0x80, 0x01, 0xC7, 0x0A, 0x02};
+volatile uint8_t melbus_SendBufferLong[30] = {  0x00, 0x02, 0x00, 0x01, 0x80, 0x01, 
+                                                0xC7, 0x0A, 0x02, 0x00, 0x02, 0x00, 
+                                              0x01, 0x80, 0x01, 0xC7, 0x0A, 0x02, 
+                                            0x00, 0x02, 0x00, 0x01, 0x80, 0x01, 0xC7, 0x0A, 0x02, 0x02,0x3, 0x3 };
 volatile uint8_t melbus_SendCnt = 0;
+volatile uint8_t melbus_sendCntLong = 0;
+
 volatile uint8_t melbus_DiscBuffer[6] = {0x00, 0xFC, 0xFF, 0x4A, 0xFC, 0xFF};
 volatile uint8_t melbus_DiscCnt = 0;
 volatile uint8_t melbus_Bitposition = 0x80;
@@ -59,11 +65,11 @@ void setup() {
   pinMode(MELBUS_CLOCKBIT, INPUT_PULLUP);
 #ifdef SERDBG
   //Initiate serial communication to debug via serial-usb (arduino)
-  Serial.begin(230400);
+  Serial.begin(115200);
   Serial.println("Initiating contact with Melbus: hit <space> for extra dbg info");
 #endif
   //Call function that tells HU that we want to register a new device
-  melbus_Init_SAT();
+  melbus_Init();
 }
 
 //Main loop
@@ -260,9 +266,9 @@ void loop() {
 
 
     if (incomingByte == 'i') {
-      melbus_Init_CDCHRG();
+      melbus_Init();
       Serial.println("\n forced init: ");
-      incomingByte = 0;
+      incomingByte = ' ';
 
     }
 
@@ -279,7 +285,7 @@ void loop() {
 
 
 //Notify HU that we want to trigger the first initiate procedure to add a new device (CD-CHGR) by pulling BUSY line low for 1s
-void melbus_Init_SAT() {
+void melbus_Init() {
   //Disabel interrupt on INT1 quicker then: detachInterrupt(MELBUS_CLOCKBIT_INT);
   EIMSK &= ~(1 << INT1);
 
@@ -298,26 +304,6 @@ void melbus_Init_SAT() {
 }
 
 
-
-
-//Notify HU that we want to trigger the first initiate procedure to add a new device (CD-CHGR) by pulling BUSY line low for 1s
-void melbus_Init_CDCHRG() {
-  //Disabel interrupt on INT1 quicker then: detachInterrupt(MELBUS_CLOCKBIT_INT);
-  EIMSK &= ~(1 << INT1);
-
-  // Wait untill Busy-line goes high (not busy) before we pull BUSY low to request init
-  while (digitalRead(MELBUS_BUSY) == LOW) {}
-  delayMicroseconds(10);
-
-  pinMode(MELBUS_BUSY, OUTPUT);
-  digitalWrite(MELBUS_BUSY, LOW);
-  delay(1200);
-  digitalWrite(MELBUS_BUSY, HIGH);
-  pinMode(MELBUS_BUSY, INPUT_PULLUP);
-
-  //Enable interrupt on INT1, quicker then: attachInterrupt(MELBUS_CLOCKBIT_INT, MELBUS_CLOCK_INTERRUPT, RISING);
-  EIMSK |= (1 << INT1);
-}
 
 
 
@@ -325,10 +311,6 @@ void melbus_Init_CDCHRG() {
 //Global external interrupt that triggers when clock pin goes high after it has been low for a short time => time to read datapin
 void MELBUS_CLOCK_INTERRUPT() {
   
-  #define ID1 E8
-  #define ID2 E9
-  #define RESPONSEID EE
-  #define IDMASTERMODE EF
 
   
   //Read status of Datapin and set status of current bit in recv_byte
@@ -372,11 +354,21 @@ void MELBUS_CLOCK_INTERRUPT() {
     //set bool to true to evaluate the bytes in main loop
     ByteIsRead = true;
 
+//sat
 
-  #define ID1 0xE8
-  #define ID2 0xE9
-  #define RESPONSEID 0xEE
-  #define IDMASTERMODE 0xEF
+  #define ID1 0xC0 //0xE8
+  #define ID2 0xC1 //0xE9
+  #define RESPONSEID 0xC6 //0xEE
+  #define IDMASTERMODE  0xc7 //0xEF
+  
+  
+  //tv
+  /*
+  #define ID1 0xA8 //0xE8
+  #define ID2 0xA9//0xE9
+  #define RESPONSEID 0xAE //0xEE
+  #define IDMASTERMODE  0xAF //0xEF
+  */
   
     //Reset bitcount to first bit in byte
     melbus_Bitposition = 0x80;
@@ -384,6 +376,23 @@ void MELBUS_CLOCK_INTERRUPT() {
     {
       //cold start HU
       InitialSequence_ext = true;
+    }
+    //vgi
+    //A8 1F E8 0 F8 FF FF FF FF FF  <--- this is send when we have the TV-bits i place, when we substitute the FF's, we get the Reverse Camera in the HU
+    //0x00, 0x02, 0x00, 0x01, 0x80, is reversed into the FF's, so 0x80 first FF
+    else if ( melbus_LastReadByte[0] == 0xF8 && melbus_LastReadByte[1]==0x00 && melbus_LastReadByte[2]== 0xE8 && melbus_LastReadByte[3]==0x1f && melbus_LastReadByte[4] == 0xA8
+    
+    ){
+     Serial.println("tvak"); //toggles back view??
+     
+     melbus_SendCnt = 5; 
+    }
+    //vgi sat
+    //C1 1B 7F 1 8
+    //C3 1F 7C 0 FF FF FF FF FF FF FF FF FF FF FF FF FF FF FF FF FF FF FF FF FF FF FF FF FF FF FF FF FF FF 
+    else if (melbus_LastReadByte[0] == 0x08 && melbus_LastReadByte[1] == 0x01 && melbus_LastReadByte[2] == 0x7f && melbus_LastReadByte[3] == 0x1b && melbus_LastReadByte[4] == 0xc1){
+     Serial.println("satak");
+     melbus_sendCntLong = 30;
     }
     else if (melbus_LastReadByte[2] == 0x0 && (melbus_LastReadByte[1] == 0x1C || melbus_LastReadByte[1] == 0x4C) && melbus_LastReadByte[0] == 0xED)
     {
@@ -499,6 +508,10 @@ void MELBUS_CLOCK_INTERRUPT() {
 #endif
     }
     
+    if (melbus_sendCntLong){
+      melbus_OutByte = melbus_SendBufferLong[30 - melbus_sendCntLong];
+      melbus_sendCntLong--;
+    }
     
     if (melbus_SendCnt) {
       melbus_OutByte = melbus_SendBuffer[9 - melbus_SendCnt];
