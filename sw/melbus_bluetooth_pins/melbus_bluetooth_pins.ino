@@ -17,21 +17,17 @@
    pulse train width=120us (15us per clock cycle), high phase between two pulse trains is 540us-600us
 */
 
-#include <SoftwareSerial.h>
 
-SoftwareSerial mySerial(10, 11); // RX, TX
 
-#define OVC_SETPARING "AT#CB\r\n"
-#define OVC_LASTPARING "AT#CC\r\n"
-#define OVC_PLAY_NEXT "AT#MD\r\n"
-#define OVC_PLAY_PREVIOUS "AT#ME\r\n"
-#define OVC_PLAY_PAUSE "AT#MA\r\n"
-#define OVC_PLAY_STOP "AT#MC\r\n"
-#define OVC_RESET "AT#CZ\r\n"
-#define OVC_PLAY_FR "AT#MR\r\n"
-#define OVC_PLAY_FF "AT#MS\r\n"
-#define OVC_PLAY_CANCEL_FAST "AT#MT\r\n"
-#define OVC_SWITCH_DEVICES "AT#MZ\r\n"
+const int PLAY_PAUSE_PIN = A0;
+const int NEXT_PIN = A1;
+const int PREV_PIN = A2;
+
+#define BLK_PLAY digitalWrite(PLAY_PAUSE_PIN, HIGH);delay(200); digitalWrite(PLAY_PAUSE_PIN, LOW);
+#define BLK_NEXT digitalWrite(NEXT_PIN, HIGH);delay(200); digitalWrite(NEXT_PIN, LOW);
+#define BLK_PREV digitalWrite(PREV_PIN, HIGH);delay(200); digitalWrite(PREV_PIN, LOW);
+
+
 enum cmds {
   NONE,
   PLAY,
@@ -76,10 +72,10 @@ volatile int incomingByte = 0;   // for incoming serial data
 
 //Startup seequence
 void setup() {
+  pinMode(PLAY_PAUSE_PIN, OUTPUT);
+  pinMode(NEXT_PIN, OUTPUT);
+  pinMode(PREV_PIN, OUTPUT);
 
-  mySerial.begin(115200);
-  //reset ovc module
-  // mySerial.print("AT#CZ\r\n");
 
 
   //Data is deafult input high
@@ -101,24 +97,21 @@ void setup() {
 //Main loop
 void loop() {
 
-  if (mySerial.available()) {      // If anything comes in Serial (USB),
-    Serial.write(mySerial.read());   // read it and send it out Serial1 (pins 0 & 1)
-  }
 
   //handled sheduled commands
   switch (nextCmd) {
-#define CMD(_X_, _Y_) case _X_: mySerial.print(_Y_); nextCmd=NONE; break;
+#define CMD(_X_, _Y_) case _X_: _Y_; nextCmd=NONE; break;
 #define CMDFAST(_X_, _Y_) case _X_: mySerial.print(_Y_); delay(1500); mySerial.print(OVC_PLAY_CANCEL_FAST); nextCmd=NONE; break;
     case NONE:
       break;
-      CMD (PLAY, OVC_PLAY_PAUSE);
-      CMD (STOP, OVC_PLAY_STOP);
-      CMD (NEXT, OVC_PLAY_NEXT);
-      CMD (PREVIOUS, OVC_PLAY_PREVIOUS);
-      CMD (RESET, OVC_RESET);
-      CMD (SWITCH_DEV, OVC_SWITCH_DEVICES);
-      CMDFAST (FASTREVERSE, OVC_PLAY_FR);
-      CMDFAST (FASTFORWARD, OVC_PLAY_FF);
+      CMD (PLAY, BLK_PLAY);
+      // CMD (STOP, OVC_PLAY_STOP);
+      CMD (NEXT, BLK_NEXT);
+      CMD (PREVIOUS, BLK_PREV);
+      //  CMD (RESET, OVC_RESET);
+      // CMD (SWITCH_DEV, OVC_SWITCH_DEVICES);
+      //  CMDFAST (FASTREVERSE, OVC_PLAY_FR);
+      //  CMDFAST (FASTFORWARD, OVC_PLAY_FF);
 
 
       // CMD (FASTFORWARD, OVC_PLAY_FF);
@@ -295,11 +288,7 @@ void loop() {
       incomingByte = 0;
     }
 
-    if (incomingByte == 'q') {
-      nextCmd = SWITCH_DEV;
-      Serial.println("r");
-      incomingByte = 0;
-    }
+
 
 
 
