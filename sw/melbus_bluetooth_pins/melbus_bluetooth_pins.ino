@@ -18,29 +18,41 @@
 */
 
 
-
-const int PLAY_PAUSE_PIN = A0;
-const int NEXT_PIN = A1;
-const int PREV_PIN = A2;
-
-#define BLK_PLAY digitalWrite(PLAY_PAUSE_PIN, HIGH);delay(200); digitalWrite(PLAY_PAUSE_PIN, LOW);
-#define BLK_NEXT digitalWrite(NEXT_PIN, HIGH);delay(200); digitalWrite(NEXT_PIN, LOW);
-#define BLK_PREV digitalWrite(PREV_PIN, HIGH);delay(200); digitalWrite(PREV_PIN, LOW);
-
+const int NEXT_PIN = 12;
+const int PREV_PIN = 11;
+const int PLAY_PAUSE_PIN = 10;
+const int VOL_DOWN = 13;
+const int VOL_UP = A0;
+#define SHORT_DELAY 160
+#define BLK_PLAY digitalWrite(PLAY_PAUSE_PIN, HIGH);delay(SHORT_DELAY); digitalWrite(PLAY_PAUSE_PIN, LOW);delay(10);
+#define BLK_NEXT digitalWrite(NEXT_PIN, HIGH);delay(SHORT_DELAY); digitalWrite(NEXT_PIN, LOW);delay(10);
+#define BLK_PREV digitalWrite(PREV_PIN, HIGH);delay(SHORT_DELAY); digitalWrite(PREV_PIN, LOW);delay(10);
+#define BLK_VOICE digitalWrite(VOL_DOWN, HIGH);delay(SHORT_DELAY); digitalWrite(VOL_DOWN, LOW);delay(10);
+#define BLK_REJECT  digitalWrite(PLAY_PAUSE_PIN, HIGH);delay(1050); digitalWrite(PLAY_PAUSE_PIN, LOW);delay(1050);
 
 enum cmds {
   NONE,
-  PLAY,
-  PAUSE,
+  RND,
+  // PAUSE,
   NEXT,
   PREVIOUS,
   STOP,
-  FASTFORWARD,
-  FASTREVERSE,
-  PAIR,
-  RESET,
-  SWITCH_DEV
+  FF,
+  FR,
+  // VOICE,
+  // RESET,
+  // SWITCH_DEV
+
 };
+
+/*
+  ISR(WDT_vect)
+  {
+       Serial.println("Watchdog Kicked in");
+  }
+
+*/
+
 
 volatile cmds nextCmd = NONE;
 
@@ -72,11 +84,12 @@ volatile int incomingByte = 0;   // for incoming serial data
 
 //Startup seequence
 void setup() {
+
   pinMode(PLAY_PAUSE_PIN, OUTPUT);
   pinMode(NEXT_PIN, OUTPUT);
   pinMode(PREV_PIN, OUTPUT);
-
-
+  pinMode(VOL_DOWN, OUTPUT);
+  pinMode(VOL_UP, OUTPUT);
 
   //Data is deafult input high
   pinMode(MELBUS_DATA, INPUT_PULLUP);
@@ -92,6 +105,7 @@ void setup() {
 #endif
   //Call function that tells HU that we want to register a new device
   melbus_Init_CDCHRG();
+
 }
 
 //Main loop
@@ -101,27 +115,22 @@ void loop() {
   //handled sheduled commands
   switch (nextCmd) {
 #define CMD(_X_, _Y_) case _X_: _Y_; nextCmd=NONE; break;
-#define CMDFAST(_X_, _Y_) case _X_: mySerial.print(_Y_); delay(1500); mySerial.print(OVC_PLAY_CANCEL_FAST); nextCmd=NONE; break;
     case NONE:
       break;
-      CMD (PLAY, BLK_PLAY);
+      CMD (RND, BLK_PLAY); ///play /pause / answer
       // CMD (STOP, OVC_PLAY_STOP);
       CMD (NEXT, BLK_NEXT);
       CMD (PREVIOUS, BLK_PREV);
-      //  CMD (RESET, OVC_RESET);
-      // CMD (SWITCH_DEV, OVC_SWITCH_DEVICES);
-      //  CMDFAST (FASTREVERSE, OVC_PLAY_FR);
-      //  CMDFAST (FASTFORWARD, OVC_PLAY_FF);
-
-
-      // CMD (FASTFORWARD, OVC_PLAY_FF);
+      CMD (FF, BLK_VOICE);
+      CMD (FR, BLK_REJECT); //reject call
+    default:
+      Serial.print("not implemented: ");
+      Serial.println(nextCmd);
+      nextCmd = NONE;
+      break;
   }
 
-  /*
-    if (Serial1.available()) {     // If anything comes in Serial1 (pins 0 & 1)
-      Serial.write(Serial1.read());   // read it and send it out Serial (USB)
-    }
-  */
+ 
   //Waiting for the clock interrupt to trigger 8 times to read one byte before evaluating the data
 #ifdef SERDBG
   if (ByteIsRead) {
@@ -245,9 +254,9 @@ void loop() {
   }
 
   if (incomingByte != 0) {
-    if (incomingByte == 's') {
-      nextCmd = PAIR;
-      Serial.println("s");
+    if (incomingByte == 'v') {
+      nextCmd = FF;
+      Serial.println("v");
       incomingByte = 0;
     }
 
@@ -264,7 +273,7 @@ void loop() {
     }
 
     if (incomingByte == 'p') {
-      nextCmd = PLAY;
+      nextCmd = RND;
       incomingByte = 0;
       Serial.println("p");
 
@@ -272,26 +281,21 @@ void loop() {
 
 
     if (incomingByte == '1') {
-      nextCmd = FASTFORWARD;
+      nextCmd = FF;
       incomingByte = 0;
       Serial.println("1");
     }
     if (incomingByte == '2') {
-      nextCmd = FASTREVERSE;
+      nextCmd = FR;
       incomingByte = 0;
       Serial.println("2");
     }
 
-    if (incomingByte == 'r') {
-      nextCmd = RESET;
-      Serial.println("r");
+    if (incomingByte == 's') {
+      nextCmd = STOP;
+      Serial.println("s");
       incomingByte = 0;
     }
-
-
-
-
-
 
     if (incomingByte == 'i') {
       melbus_Init_CDCHRG();
@@ -407,7 +411,7 @@ void MELBUS_CLOCK_INTERRUPT() {
       melbus_OutByte = 0x00; // respond to powerdown;
       melbus_SendBuffer[1] = 0x02; // STOP
       melbus_SendBuffer[8] = 0x02; // STOP
-      nextCmd = STOP;
+      //      nextCmd = STOP;
 #ifdef SERDBG
       Serial.println("powerdown");
 #endif
@@ -416,7 +420,7 @@ void MELBUS_CLOCK_INTERRUPT() {
     {
       // RND
 #ifdef SERDBG
-      nextCmd = PLAY;
+      nextCmd = RND;
       Serial.println("rnd");
 #endif
     }
@@ -424,7 +428,7 @@ void MELBUS_CLOCK_INTERRUPT() {
     {
       // FF
 #ifdef SERDBG
-      nextCmd = FASTFORWARD;
+      nextCmd = FF;
       Serial.println("FF");
 #endif
     }
@@ -434,7 +438,7 @@ void MELBUS_CLOCK_INTERRUPT() {
       melbus_OutByte = 0x00; // respond to start;
       melbus_SendBuffer[1] = 0x08; // START
       melbus_SendBuffer[8] = 0x08; // START
-      nextCmd = FASTREVERSE;
+      nextCmd = FR;
 #ifdef SERDBG
       Serial.println("FR");
 #endif
@@ -447,14 +451,14 @@ void MELBUS_CLOCK_INTERRUPT() {
 #ifdef SERDBG
       Serial.println("D-");
 #endif
-      nextCmd = SWITCH_DEV;
+      //      nextCmd = SWITCH_DEV;
     }
     else if ((melbus_LastReadByte[3] == 0xE8 || melbus_LastReadByte[3] == 0xE9) && (melbus_LastReadByte[2] == 0x1A || melbus_LastReadByte[2] == 0x4A) && melbus_LastReadByte[1] == 0x50 && melbus_LastReadByte[0] == 0x41)
     {
       // D+
       melbus_SendBuffer[3]++;
       melbus_SendBuffer[5] = 0x01;
-      nextCmd = SWITCH_DEV;
+      //      nextCmd = SWITCH_DEV;
 
 #ifdef SERDBG
       Serial.println("D+");
